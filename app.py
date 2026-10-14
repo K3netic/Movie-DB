@@ -2,7 +2,6 @@ import streamlit as st
 import urllib.parse
 import requests
 import sqlite3
-import os
 from google import genai
 
 # Set page layout to wide and mobile-friendly
@@ -76,22 +75,27 @@ init_db()
 
 # --- APP UI ---
 st.title("🎬 Master Film & TV Search")
-st.caption("Live Search Across All Movies & TV Shows with Nudity Flags & AZNude Links")
+st.caption("Live Search with GenAI Smart Filtering & AZNude Links")
 
 # Navigation Tabs
 tab_search, tab_watchlist = st.tabs(["🔎 Global Search", "📋 My Saved / Watched List"])
 
 # ==========================================
-# TAB 1: GLOBAL ON-DEMAND SEARCH
+# TAB 1: GLOBAL ON-DEMAND & GENAI SEARCH
 # ==========================================
 with tab_search:
     st.subheader("Search Master Database")
     
     col_q, col_type = st.columns([3, 1])
     with col_q:
-        search_query = st.text_input("Enter any movie or TV show title:", placeholder="e.g. Shortbus, Game of Thrones, Euphoria...")
+        search_query = st.text_input("Enter standard keyword or title:", placeholder="e.g. Shortbus, Euphoria...")
     with col_type:
         media_type_choice = st.selectbox("Type:", ["All", "Movie", "TV Show"])
+
+    # GenAI Conversational Search Box
+    st.markdown("---")
+    st.subheader("🤖 GenAI Natural Language Search")
+    ai_query = st.text_input("Or ask the AI conversationally:", placeholder="e.g. Find me an acclaimed drama about intense personal relationships...")
 
     # Content & Rating Filters
     st.markdown("#### Filters")
@@ -101,14 +105,16 @@ with tab_search:
     with f_col2:
         nudity_filter = st.multiselect("Nudity Content Flags:", ["Male Nudity", "Female Nudity", "Full Frontal", "Unsimulated Sex"])
 
-    if search_query.strip():
+    # Determine query string to send to TMDB
+    active_search_term = ai_query if ai_query.strip() else search_query
+
+    if active_search_term.strip():
         if not tmdb_api_key:
-            st.error("Please add `TMDB_API_KEY` to Streamlit Secrets to enable live global search.")
+            st.error("Please add `TMDB_API_KEY` to Streamlit Secrets to enable live search.")
         else:
-            with st.spinner(f"Searching global database for '{search_query}'..."):
+            with st.spinner("Searching database..."):
                 try:
-                    # Query TMDB Live Search API
-                    search_url = f"https://api.themoviedb.org/3/search/multi?api_key={tmdb_api_key}&query={urllib.parse.quote(search_query)}"
+                    search_url = f"https://api.themoviedb.org/3/search/multi?api_key={tmdb_api_key}&query={urllib.parse.quote(active_search_term)}"
                     res = requests.get(search_url).json()
                     results = res.get("results", [])
                     
@@ -128,6 +134,25 @@ with tab_search:
                             
                         filtered_results.append(item)
                     
+                    # Optional GenAI insight generation if an AI query was made
+                    ai_insight = ""
+                    if ai_query.strip() and ai_available and filtered_results:
+                        db_summary = "\n".join([f"Title: {item.get('title') or item.get('name')} ({str(item.get('release_date') or item.get('first_air_date') or '2000')[:4]}), Overview: {item.get('overview', '')}" for item in filtered_results[:8]])
+                        prompt = f"""
+                        You are a film database assistant. The user asked: "{ai_query}"
+                        Here are the top search results:
+                        {db_summary}
+                        Provide a concise, 1-sentence recommendation insight explaining which title fits best and why.
+                        """
+                        try:
+                            ai_response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
+                            ai_insight = ai_response.text.strip()
+                        except Exception:
+                            pass
+
+                    if ai_insight:
+                        st.info(f"💡 **AI Insight:** {ai_insight}")
+
                     st.success(f"Found {len(filtered_results)} matching titles")
                     st.divider()
 
@@ -141,24 +166,8 @@ with tab_search:
                         synopsis = item.get("overview", "No synopsis available.")
                         lang = item.get("original_language", "en").upper()
                         
-                        # Get saved status from local SQLite DB
                         is_watched, saved_tags = get_watched_status(m_id)
-                        
-                        # Check nudity filter if selected
-                        if nudity_filter and not any(f in saved_tags for f in nudity_filter):
-                            # Default tags based on synopsis if not manually tagged yet
-                            synopsis_lower = synopsis.lower()
-                            has_flag = False
-                            if "male nudity" in nudity_filter and ("male nudity" in synopsis_lower or "unsimulated" in synopsis_lower):
-                                has_flag = True
-                            if "female nudity" in nudity_filter and ("female nudity" in synopsis_lower or "topless" in synopsis_lower):
-                                has_flag = True
-                            if "unsimulated sex" in nudity_filter and "unsimulated" in synopsis_lower:
-                                has_flag = True
-                            if not has_flag and nudity_filter:
-                                continue
 
-                        # Card Rendering
                         with st.container():
                             status_badge = "✅ Watched" if is_watched else "📌 Unwatched"
                             type_badge = "🎬 Movie" if m_type == "movie" else "📺 TV Series"
@@ -167,7 +176,6 @@ with tab_search:
                             st.write(f"**Rating:** ⭐ {rating}/10 | **Language:** {lang} | **Released:** {release_date}")
                             st.write(f"**Synopsis:** {synopsis}")
                             
-                            # Action Buttons
                             b_col1, b_col2, b_col3 = st.columns(3)
                             with b_col1:
                                 st.link_button("🌐 AZNude Search", py_url_format(title, "aznude"))
