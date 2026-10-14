@@ -1,10 +1,9 @@
 import streamlit as st
 import urllib.parse
-import requests
 from google import genai
 
 # Set page layout to wide and mobile-friendly
-st.set_page_config(page_title="Personal Movie DB", page_icon="🎬", layout="wide")
+st.set_page_config(page_title="Personal Film Nudity & Search DB", page_icon="🎬", layout="wide")
 
 # Initialize Gemini Client
 try:
@@ -13,170 +12,160 @@ try:
 except Exception:
     ai_available = False
 
-# Get TMDB API Key from secrets if available
-tmdb_api_key = st.secrets.get("TMDB_API_KEY", "")
-
 py_url_format = lambda title, site: f"https://www.{'azmen' if site == 'men' else 'aznude'}.com/search.html?q={urllib.parse.quote(title)}"
 
-# Initialize Session State Database (so added movies persist during your visit)
+# Initialize Session State Database with expanded IMDb metadata and 'watched' tracking
 if "movie_database" not in st.session_state:
     st.session_state.movie_database = [
         {
             "id": "1",
             "title": "Shortbus",
             "year": 2006,
+            "release_date": "2006-10-06",
+            "language": "English",
             "genre": ["Comedy", "Drama"],
             "rating": 6.4,
             "synopsis": "A group of interconnected New Yorkers navigate intimacy, art, and relationships through an underground artistic salon.",
-            "tags": ["lgbt", "unsimulated sex", "indie", "new york", "ensemble"]
+            "nudity_tags": ["Male Nudity", "Female Nudity", "Unsimulated Sex"],
+            "watched": False
         },
         {
             "id": "2",
             "title": "Forgetting Sarah Marshall",
             "year": 2008,
+            "release_date": "2008-04-18",
+            "language": "English",
             "genre": ["Comedy", "Romance"],
             "rating": 7.1,
             "synopsis": "Devastated by a sudden breakup, a struggling musician takes a Hawaiian vacation, only to find his ex-girlfriend staying at the same resort with her new rockstar boyfriend.",
-            "tags": ["comedy", "full frontal", "male nudity", "breakup", "hawaii"]
+            "nudity_tags": ["Male Nudity", "Female Nudity", "Full Frontal"],
+            "watched": True
         },
         {
             "id": "3",
             "title": "Rotting in the Sun",
             "year": 2023,
+            "release_date": "2023-09-08",
+            "language": "English / Spanish",
             "genre": ["Comedy", "Mystery"],
             "rating": 6.4,
             "synopsis": "A dark, satirical comedy exploring Mexico City's queer social scenes when a filmmaker suddenly disappears.",
-            "tags": ["lgbt", "dark comedy", "satire", "unsimulated sex", "mexico city"]
+            "nudity_tags": ["Male Nudity", "Unsimulated Sex"],
+            "watched": False
         }
     ]
 
 # App Title & Header
-st.title("🎬 Personal Movie Search")
-st.caption("AI-Powered Mobile Database with TMDB Integration")
+st.title("🎬 Film Nudity & Search Database")
+st.caption("Custom Mobile Index with IMDb Metadata & AZNude Links")
 
-# --- SIDEBAR: TMDB MOVIE FETHER & FILTERS ---
-st.sidebar.header("➕ Add Movie via TMDB")
+# --- SIDEBAR FILTERS ---
+st.sidebar.header("🔍 Filters & Controls")
 
-if not tmdb_api_key:
-    st.sidebar.warning("Add `TMDB_API_KEY` in Streamlit Secrets to enable automatic lookups.")
+# Watched Status Filter
+watched_filter = st.sidebar.selectbox("Show Status:", ["All Films", "Unwatched Only", "Watched Only"])
 
-tmdb_search_title = st.sidebar.text_input("Movie Title to Fetch:", placeholder="e.g. God's Own Country")
-custom_tags_input = st.sidebar.text_input("Custom Tags (comma separated):", placeholder="lgbt, unsimulated sex")
+# Nudity Filter
+all_nudity_options = sorted(list(set(tag for m in st.session_state.movie_database for tag in m["nudity_tags"])))
+selected_nudity = st.sidebar.multiselect("Filter by Nudity Content:", options=all_nudity_options)
 
-if st.sidebar.button("Fetch & Add from TMDB") and tmdb_search_title and tmdb_api_key:
-    with st.spinner("Fetching from TMDB..."):
-        try:
-            # Query TMDB API Search
-            search_url = f"https://api.themoviedb.org/3/search/movie?api_key={tmdb_api_key}&query={urllib.parse.quote(tmdb_search_title)}"
-            res = requests.get(search_url).json()
-            
-            if res.get("results"):
-                movie_data = res["results"][0] # Grab top match
-                title = movie_data.get("title", tmdb_search_title)
-                year = int(movie_data.get("release_date", "2000-01-01")[:4]) if movie_data.get("release_date") else 2020
-                synopsis = movie_data.get("overview", "No synopsis available.")
-                rating = round(movie_data.get("vote_average", 6.0), 1)
-                
-                # Format tags
-                tags = [t.strip().lower() for t in custom_tags_input.split(",")] if custom_tags_input else ["indie"]
-                
-                # Create new entry ID
-                new_id = str(len(st.session_state.movie_database) + 1)
-                
-                new_movie = {
-                    "id": new_id,
-                    "title": title,
-                    "year": year,
-                    "genre": ["Drama"], # TMDB genres can be mapped later, defaulting to Drama
-                    "rating": rating if rating > 0 else 6.0,
-                    "synopsis": synopsis,
-                    "tags": tags
-                }
-                
-                st.session_state.movie_database.append(new_movie)
-                st.sidebar.success(f"Successfully added '{title}'!")
-                st.rerun()
-            else:
-                st.sidebar.error("Movie not found on TMDB.")
-        except Exception as e:
-            st.sidebar.error(f"Error: {str(e)}")
-
-st.sidebar.markdown("---")
-st.sidebar.header("🔍 Traditional Filters")
-all_genres = list(set(g for movie in st.session_state.movie_database for g in movie["genre"]))
-selected_genres = st.sidebar.multiselect("Filter by Genre", options=all_genres)
+# Minimum Rating Slider
 min_rating = st.sidebar.slider("Minimum Rating", min_value=1.0, max_value=10.0, value=6.0, step=0.1)
 
-# AI Smart Search Section
-st.subheader("🤖 AI Conversational Search")
-ai_query = st.text_input("Ask the AI anything about your database:", placeholder="e.g. Find me a dark comedy from recent years...")
+st.sidebar.markdown("---")
+st.sidebar.subheader("➕ Add Custom Film Entry")
+with st.sidebar.form("add_movie_form"):
+    new_title = st.text_input("Title")
+    new_year = st.number_input("Year", min_value=1900, max_value=2030, value=2024)
+    new_lang = st.text_input("Language", value="English")
+    new_rating = st.slider("Rating", 1.0, 10.0, 6.5, 0.1)
+    new_synopsis = st.text_area("Synopsis")
+    new_nudity = st.multiselect("Nudity Tags", ["Male Nudity", "Female Nudity", "Full Frontal", "Unsimulated Sex"])
+    
+    submitted = st.form_submit_button("Add to Database")
+    if submitted and new_title:
+        new_id = str(len(st.session_state.movie_database) + 1)
+        st.session_state.movie_database.append({
+            "id": new_id,
+            "title": new_title,
+            "year": int(new_year),
+            "release_date": f"{int(new_year)}-01-01",
+            "language": new_lang,
+            "genre": ["Drama"],
+            "rating": float(new_rating),
+            "synopsis": new_synopsis,
+            "nudity_tags": new_nudity,
+            "watched": False
+        })
+        st.sidebar.success(f"Added {new_title}!")
+        st.rerun()
 
+# --- MAIN SEARCH AREA ---
+st.subheader("🔎 Search Database")
+search_query = st.text_input("Search by title, language, or keyword:", placeholder="e.g. English, New York, Comedy...")
+
+# Filtering Logic
 filtered_movies = []
-ai_recommendation_text = ""
 
-if ai_query.strip() and ai_available:
-    with st.spinner("AI is searching your database..."):
-        db_summary = "\n".join([f"ID: {m['id']}, Title: {m['title']} ({m['year']}), Genre: {m['genre']}, Synopsis: {m['synopsis']}, Tags: {m['tags']}" for m in st.session_state.movie_database])
+for movie in st.session_state.movie_database:
+    # 1. Rating check
+    if movie["rating"] < min_rating:
+        continue
         
-        prompt = f"""
-        You are a smart movie database assistant. Here is the user's movie database:
-        {db_summary}
+    # 2. Watched filter check
+    if watched_filter == "Unwatched Only" and movie["watched"]:
+        continue
+    if watched_filter == "Watched Only" and not movie["watched"]:
+        continue
         
-        The user is searching for: "{ai_query}"
-        
-        1. Select which movie IDs from the database match this request.
-        2. Provide a short, friendly 1-sentence explanation of why it matches.
-        Format your response strictly as a comma-separated list of matching IDs, followed by a pipe character (|), followed by your explanation. Example: 1,3 | These films match your request for dark/indie themes.
-        If none match, reply with "NONE | No matching films found."
-        """
-        
-        try:
-            response = client.models.generate_content(
-                model='gemini-3.8-flash',
-                contents=prompt
-            )
-            
-            parts = response.text.strip().split("|")
-            matching_ids = [i.strip() for i in parts[0].split(",") if i.strip().isdigit()]
-            ai_recommendation_text = parts[1].strip() if len(parts) > 1 else ""
-            
-            for movie in st.session_state.movie_database:
-                if movie["id"] in matching_ids and movie["rating"] >= min_rating:
-                    filtered_movies.append(movie)
-        except Exception as e:
-            ai_recommendation_text = f"AI error occurred: {str(e)}"
-            
-if not ai_query.strip():
-    for movie in st.session_state.movie_database:
-        if movie["rating"] < min_rating:
+    # 3. Nudity filter check (must match all selected nudity tags if any are chosen)
+    if selected_nudity:
+        if not all(tag in movie["nudity_tags"] for tag in selected_nudity):
             continue
-        if selected_genres and not any(g in movie["genre"] for g in selected_genres):
+            
+    # 4. Text / Keyword search check
+    if search_query.strip():
+        q = search_query.lower().strip()
+        in_title = q in movie["title"].lower()
+        in_synopsis = q in movie["synopsis"].lower()
+        in_lang = q in movie["language"].lower()
+        if not (in_title or in_synopsis or in_lang):
             continue
-        filtered_movies.append(movie)
-
-if ai_query.strip() and ai_available and ai_recommendation_text:
-    st.info(f"💡 **AI Insight:** {ai_recommendation_text}")
+            
+    filtered_movies.append(movie)
 
 # Results Display
 st.markdown("---")
 st.subheader(f"Results ({len(filtered_movies)})")
 
 if not filtered_movies:
-    st.info("No movies found matching your query or filters.")
+    st.info("No films found matching your active filters.")
 else:
-    for movie in filtered_movies:
+    for i, movie in enumerate(filtered_movies):
         with st.container():
-            st.markdown(f"### {movie['title']} ({movie['year']})")
-            st.write(f"**Rating:** ⭐ {movie['rating']}/10 | **Genres:** {', '.join(movie['genre'])}")
+            # Header info with watched status indicator
+            status_icon = "✅ Watched" if movie["watched"] else "📌 Unwatched"
+            st.markdown(f"### {movie['title']} ({movie['year']}) — *{status_icon}*")
+            
+            st.write(f"**Rating:** ⭐ {movie['rating']}/10 | **Language:** {movie['language']} | **Released:** {movie['release_date']}")
             st.write(f"**Synopsis:** {movie['synopsis']}")
             
-            tags_formatted = " ".join([f"`#{tag}`" for tag in movie['tags']])
-            st.markdown(f"**Tags:** {tags_formatted}")
+            # Nudity Content Tags
+            nudity_formatted = " ".join([f"`{tag}`" for tag in movie['nudity_tags']])
+            st.markdown(f"**Content Flags:** {nudity_formatted if nudity_formatted else 'None specified'}")
             
-            col1, col2 = st.columns(2)
+            # Action Buttons: AZNude/AZMen + Mark as Watched Toggle
+            col1, col2, col3 = st.columns(3)
             with col1:
-                st.link_button("🌐 Search on AZNude", py_url_format(movie["title"], "aznude"))
+                st.link_button("🌐 AZNude Search", py_url_format(movie["title"], "aznude"))
             with col2:
-                st.link_button("🌐 Search on AZMen", py_url_format(movie["title"], "men"))
+                st.link_button("🌐 AZMen Search", py_url_format(movie["title"], "men"))
+            with col3:
+                # Find original index in session state to toggle watched state accurately
+                original_index = next(idx for idx, m in enumerate(st.session_state.movie_database) if m["id"] == movie["id"])
+                btn_label = "Mark Unwatched" if movie["watched"] else "Mark Watched"
+                if st.button(btn_label, key=f"watch_btn_{movie['id']}"):
+                    st.session_state.movie_database[original_index]["watched"] = not movie["watched"]
+                    st.rerun()
             
             st.divider()
