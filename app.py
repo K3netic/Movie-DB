@@ -1,13 +1,21 @@
 import streamlit as st
 import urllib.parse
+from google import genai
 
 # Set page layout to wide and mobile-friendly
 st.set_page_config(page_title="Personal Movie DB", page_icon="🎬", layout="wide")
 
-# Function to generate direct search URLs using the query format
+# Initialize Gemini Client using Streamlit Secrets
+# (We will set up your API key in Streamlit Cloud settings next)
+try:
+    client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+    ai_available = True
+except Exception:
+    ai_available = False
+
 py_url_format = lambda title, site: f"https://www.{'azmen' if site == 'men' else 'aznude'}.com/search.html?q={urllib.parse.quote(title)}"
 
-# Sample local database
+# Sample local database (You can keep adding movies here!)
 MOVIE_DATABASE = [
     {
         "id": "1",
@@ -40,42 +48,75 @@ MOVIE_DATABASE = [
 
 # App Title & Header
 st.title("🎬 Personal Movie Search")
-st.caption("Mobile-optimized personal database with working search queries.")
+st.caption("AI-Powered Mobile Database")
 
 # Sidebar Filters
 st.sidebar.header("🔍 Traditional Filters")
-
 all_genres = list(set(g for movie in MOVIE_DATABASE for g in movie["genre"]))
 selected_genres = st.sidebar.multiselect("Filter by Genre", options=all_genres)
 min_rating = st.sidebar.slider("Minimum Rating", min_value=1.0, max_value=10.0, value=6.0, step=0.1)
 
-# Search Input
-st.subheader("Smart Keyword Search")
-search_query = st.text_input("Search by keyword, tag, actor, or title:", placeholder="e.g. lgbt, hawaii, dark comedy...")
+# AI Smart Search Section
+st.subheader("🤖 AI Conversational Search")
+ai_query = st.text_input("Ask the AI anything about your database:", placeholder="e.g. Find me a dark comedy from recent years...")
 
-# Filtering Logic
+# AI filtering logic or fallback to keyword filtering
 filtered_movies = []
+ai_recommendation_text = ""
 
-for movie in MOVIE_DATABASE:
-    if movie["rating"] < min_rating:
-        continue
-    if selected_genres and not any(g in movie["genre"] for g in selected_genres):
-        continue
-    if search_query.strip():
-        q = search_query.lower().strip()
-        in_title = q in movie["title"].lower()
-        in_synopsis = q in movie["synopsis"].lower()
-        in_tags = any(q in tag for tag in movie["tags"])
-        if not (in_title or in_synopsis or in_tags):
+if ai_query.strip() and ai_available:
+    with st.spinner("AI is searching your database..."):
+        # Format database summary for the LLM
+        db_summary = "\n".join([f"ID: {m['id']}, Title: {m['title']} ({m['year']}), Genre: {m['genre']}, Synopsis: {m['synopsis']}, Tags: {m['tags']}" for m in MOVIE_DATABASE])
+        
+        prompt = f"""
+        You are a smart movie database assistant. Here is the user's movie database:
+        {db_summary}
+        
+        The user is searching for: "{ai_query}"
+        
+        1. Select which movie IDs from the database match this request.
+        2. Provide a short, friendly 1-sentence explanation of why it matches.
+        Format your response strictly as a comma-separated list of matching IDs, followed by a pipe character (|), followed by your explanation. Example: 1,3 | These films match your request for dark/indie themes.
+        If none match, reply with "NONE | No matching films found."
+        """
+        
+        response = client.models.generate_content(
+            model='gemini-2.5-flash',
+            contents=prompt
+        )
+        
+        try:
+            parts = response.text.strip().split("|")
+            matching_ids = [i.strip() for i in parts[0].split(",") if i.strip().isdigit()]
+            ai_recommendation_text = parts[1].strip() if len(parts) > 1 else ""
+            
+            for movie in MOVIE_DATABASE:
+                if movie["id"] in matching_ids and movie["rating"] >= min_rating:
+                    filtered_movies.append(movie)
+        except Exception:
+            # Fallback if AI output format is unexpected
+            ai_recommendation_text = "AI parsing error, falling back to standard search."
+            
+# If no AI query was typed, use standard filtering
+if not ai_query.strip():
+    for movie in MOVIE_DATABASE:
+        if movie["rating"] < min_rating:
             continue
-    filtered_movies.append(movie)
+        if selected_genres and not any(g in movie["genre"] for g in selected_genres):
+            continue
+        filtered_movies.append(movie)
+
+# Display AI Insights if active
+if ai_query.strip() and ai_available and ai_recommendation_text:
+    st.info(f"💡 **AI Insight:** {ai_recommendation_text}")
 
 # Results Display
 st.markdown("---")
 st.subheader(f"Results ({len(filtered_movies)})")
 
 if not filtered_movies:
-    st.info("No movies found matching your current filters.")
+    st.info("No movies found matching your query or filters.")
 else:
     for movie in filtered_movies:
         with st.container():
@@ -86,7 +127,6 @@ else:
             tags_formatted = " ".join([f"`#{tag}`" for tag in movie['tags']])
             st.markdown(f"**Tags:** {tags_formatted}")
             
-            # Action Buttons with correct search query formatting
             col1, col2 = st.columns(2)
             with col1:
                 st.link_button("🌐 Search on AZNude", py_url_format(movie["title"], "aznude"))
