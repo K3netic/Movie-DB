@@ -6,7 +6,6 @@ from google import genai
 st.set_page_config(page_title="Personal Movie DB", page_icon="🎬", layout="wide")
 
 # Initialize Gemini Client using Streamlit Secrets
-# (We will set up your API key in Streamlit Cloud settings next)
 try:
     client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
     ai_available = True
@@ -15,7 +14,7 @@ except Exception:
 
 py_url_format = lambda title, site: f"https://www.{'azmen' if site == 'men' else 'aznude'}.com/search.html?q={urllib.parse.quote(title)}"
 
-# Sample local database (You can keep adding movies here!)
+# Sample local database
 MOVIE_DATABASE = [
     {
         "id": "1",
@@ -66,7 +65,6 @@ ai_recommendation_text = ""
 
 if ai_query.strip() and ai_available:
     with st.spinner("AI is searching your database..."):
-        # Format database summary for the LLM
         db_summary = "\n".join([f"ID: {m['id']}, Title: {m['title']} ({m['year']}), Genre: {m['genre']}, Synopsis: {m['synopsis']}, Tags: {m['tags']}" for m in MOVIE_DATABASE])
         
         prompt = f"""
@@ -81,12 +79,13 @@ if ai_query.strip() and ai_available:
         If none match, reply with "NONE | No matching films found."
         """
         
-        response = client.models.generate_content(
-            model='gemini-2.5-flash',
-            contents=prompt
-        )
-        
         try:
+            # Updated to current model identifier
+            response = client.models.generate_content(
+                model='gemini-3.8-flash',
+                contents=prompt
+            )
+            
             parts = response.text.strip().split("|")
             matching_ids = [i.strip() for i in parts[0].split(",") if i.strip().isdigit()]
             ai_recommendation_text = parts[1].strip() if len(parts) > 1 else ""
@@ -94,9 +93,8 @@ if ai_query.strip() and ai_available:
             for movie in MOVIE_DATABASE:
                 if movie["id"] in matching_ids and movie["rating"] >= min_rating:
                     filtered_movies.append(movie)
-        except Exception:
-            # Fallback if AI output format is unexpected
-            ai_recommendation_text = "AI parsing error, falling back to standard search."
+        except Exception as e:
+            ai_recommendation_text = f"AI error occurred: {str(e)}"
             
 # If no AI query was typed, use standard filtering
 if not ai_query.strip():
