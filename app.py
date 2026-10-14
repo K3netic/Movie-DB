@@ -1,9 +1,17 @@
 import streamlit as st
+import urllib.parse
 
 # Set page layout to wide and mobile-friendly
 st.set_page_config(page_title="Personal Movie DB", page_icon="🎬", layout="wide")
 
-# Sample local database containing movies, metadata, tags, and custom external links
+# Function to generate direct search links for AZNude sites
+def get_aznude_search_url(movie_title, site="aznude"):
+    encoded_title = urllib.parse.quote(movie_title)
+    if site == "men":
+        return f"https://men.aznude.com/search/node/{encoded_title}"
+    return f"https://www.aznude.com/search/node/{encoded_title}"
+
+# Sample local database
 MOVIE_DATABASE = [
     {
         "id": "1",
@@ -12,9 +20,7 @@ MOVIE_DATABASE = [
         "genre": ["Comedy", "Drama"],
         "rating": 6.4,
         "synopsis": "A group of interconnected New Yorkers navigate intimacy, art, and relationships through an underground artistic salon.",
-        "tags": ["lgbt", "unsimulated sex", "indie", "new york", "ensemble"],
-        "aznude_url": "https://www.aznude.com/aznude/search/shortbus",
-        "men_aznude_url": "https://men.aznude.com/search/shortbus"
+        "tags": ["lgbt", "unsimulated sex", "indie", "new york", "ensemble"]
     },
     {
         "id": "2",
@@ -23,9 +29,7 @@ MOVIE_DATABASE = [
         "genre": ["Comedy", "Romance"],
         "rating": 7.1,
         "synopsis": "Devastated by a sudden breakup, a struggling musician takes a Hawaiian vacation, only to find his ex-girlfriend staying at the same resort with her new rockstar boyfriend.",
-        "tags": ["comedy", "full frontal", "male nudity", "breakup", "hawaii"],
-        "aznude_url": "https://www.aznude.com/aznude/search/forgetting-sarah-marshall",
-        "men_aznude_url": "https://men.aznude.com/search/forgetting-sarah-marshall"
+        "tags": ["comedy", "full frontal", "male nudity", "breakup", "hawaii"]
     },
     {
         "id": "3",
@@ -34,15 +38,13 @@ MOVIE_DATABASE = [
         "genre": ["Comedy", "Mystery"],
         "rating": 6.4,
         "synopsis": "A dark, satirical comedy exploring Mexico City's queer social scenes when a filmmaker suddenly disappears.",
-        "tags": ["lgbt", "dark comedy", "satire", "unsimulated sex", "mexico city"],
-        "aznude_url": "https://www.aznude.com/aznude/search/rotting-in-the-sun",
-        "men_aznude_url": "https://men.aznude.com/search/rotting-in-the-sun"
+        "tags": ["lgbt", "dark comedy", "satire", "unsimulated sex", "mexico city"]
     }
 ]
 
 # App Title & Header
 st.title("🎬 Personal Movie Search")
-st.caption("Mobile-optimized personal database with external site indexing.")
+st.caption("Mobile-optimized personal database with external site search.")
 
 # Sidebar Filters
 st.sidebar.header("🔍 Traditional Filters")
@@ -99,11 +101,11 @@ else:
             tags_formatted = " ".join([f"`#{tag}`" for tag in movie['tags']])
             st.markdown(f"**Tags:** {tags_formatted}")
             
-            # Action / Integration Links
+            # Action / Dynamic Search Links
             col1, col2 = st.columns(2)
             with col1:
-                st.link_button("🌐 View on AZNude", movie["aznude_url"])
+                st.link_button("🌐 Search on AZNude", get_aznude_search_url(movie["title"], site="aznude"))
             with col2:
-                st.link_button("🌐 View on Men.AZNude", movie["men_aznude_url"])
+                st.link_button("🌐 Search on Men.AZNude", get_aznude_search_url(movie["title"], site="men"))
             
             st.divider()
