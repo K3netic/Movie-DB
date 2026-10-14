@@ -101,93 +101,103 @@ with tab_search:
     st.markdown("#### Filters")
     f_col1, f_col2 = st.columns(2)
     with f_col1:
-        min_rating = st.slider("Minimum Rating:", 1.0, 10.0, 6.0, 0.1)
+        # Lowered default min_rating to 0.0 so unrated/new titles are not hidden by default
+        min_rating = st.slider("Minimum Rating:", 0.0, 10.0, 0.0, 0.1)
     with f_col2:
-        nudity_filter = st.multiselect("Nudity Content Flags:", ["Male Nudity", "Female Nudity", "Full Frontal", "Unsimulated Sex"])
+        nudity_filter = st.multiselect("Nudity Content Flags (Optional):", ["Male Nudity", "Female Nudity", "Full Frontal", "Unsimulated Sex"])
 
     # Determine query string to send to TMDB
-    active_search_term = ai_query if ai_query.strip() else search_query
+    active_search_term = ai_query.strip() if ai_query.strip() else search_query.strip()
 
-    if active_search_term.strip():
+    if active_search_term:
         if not tmdb_api_key:
-            st.error("Please add `TMDB_API_KEY` to Streamlit Secrets to enable live search.")
+            st.error("⚠️ `TMDB_API_KEY` is missing in Streamlit Cloud Secrets. Please add it to your secrets settings.")
         else:
             with st.spinner("Searching database..."):
                 try:
-                    search_url = f"https://api.themoviedb.org/3/search/multi?api_key={tmdb_api_key}&query={urllib.parse.quote(active_search_term)}"
-                    res = requests.get(search_url).json()
-                    results = res.get("results", [])
+                    # TMDB Multi-Search Query
+                    search_url = f"https://api.themoviedb.org/3/search/multi?api_key={tmdb_api_key}&query={urllib.parse.quote(active_search_term)}&include_adult=true"
+                    response = requests.get(search_url)
                     
-                    filtered_results = []
-                    for item in results:
-                        m_type = item.get("media_type")
-                        if media_type_choice == "Movie" and m_type != "movie":
-                            continue
-                        if media_type_choice == "TV Show" and m_type != "tv":
-                            continue
-                        if m_type not in ["movie", "tv"]:
-                            continue
-                            
-                        rating = round(item.get("vote_average", 0.0), 1)
-                        if rating < min_rating:
-                            continue
-                            
-                        filtered_results.append(item)
-                    
-                    # Optional GenAI insight generation if an AI query was made
-                    ai_insight = ""
-                    if ai_query.strip() and ai_available and filtered_results:
-                        db_summary = "\n".join([f"Title: {item.get('title') or item.get('name')} ({str(item.get('release_date') or item.get('first_air_date') or '2000')[:4]}), Overview: {item.get('overview', '')}" for item in filtered_results[:8]])
-                        prompt = f"""
-                        You are a film database assistant. The user asked: "{ai_query}"
-                        Here are the top search results:
-                        {db_summary}
-                        Provide a concise, 1-sentence recommendation insight explaining which title fits best and why.
-                        """
-                        try:
-                            ai_response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
-                            ai_insight = ai_response.text.strip()
-                        except Exception:
-                            pass
-
-                    if ai_insight:
-                        st.info(f"💡 **AI Insight:** {ai_insight}")
-
-                    st.success(f"Found {len(filtered_results)} matching titles")
-                    st.divider()
-
-                    for item in filtered_results:
-                        m_id = str(item.get("id"))
-                        m_type = item.get("media_type")
-                        title = item.get("title") if m_type == "movie" else item.get("name")
-                        release_date = item.get("release_date") if m_type == "movie" else item.get("first_air_date")
-                        year = release_date[:4] if release_date else "N/A"
-                        rating = round(item.get("vote_average", 0.0), 1)
-                        synopsis = item.get("overview", "No synopsis available.")
-                        lang = item.get("original_language", "en").upper()
+                    if response.status_code != 200:
+                        st.error(f"TMDB API Error ({response.status_code}): Check if your TMDB_API_KEY is valid.")
+                    else:
+                        res = response.json()
+                        results = res.get("results", [])
                         
-                        is_watched, saved_tags = get_watched_status(m_id)
+                        filtered_results = []
+                        for item in results:
+                            m_type = item.get("media_type")
+                            if media_type_choice == "Movie" and m_type != "movie":
+                                continue
+                            if media_type_choice == "TV Show" and m_type != "tv":
+                                continue
+                            if m_type not in ["movie", "tv"]:
+                                continue
+                                
+                            rating = round(item.get("vote_average", 0.0), 1)
+                            if rating < min_rating:
+                                continue
+                                
+                            filtered_results.append(item)
+                        
+                        # AI insight generation if conversational search was used
+                        ai_insight = ""
+                        if ai_query.strip() and ai_available and filtered_results:
+                            db_summary = "\n".join([f"Title: {item.get('title') or item.get('name')} ({str(item.get('release_date') or item.get('first_air_date') or 'N/A')[:4]}), Overview: {item.get('overview', '')}" for item in filtered_results[:6]])
+                            prompt = f"""
+                            You are a film database assistant. The user asked: "{ai_query}"
+                            Here are the top search results:
+                            {db_summary}
+                            Provide a concise, 1-sentence recommendation insight explaining which title fits best and why.
+                            """
+                            try:
+                                ai_response = client.models.generate_content(model='gemini-3.8-flash', contents=prompt)
+                                ai_insight = ai_response.text.strip()
+                            except Exception:
+                                pass
 
-                        with st.container():
-                            status_badge = "✅ Watched" if is_watched else "📌 Unwatched"
-                            type_badge = "🎬 Movie" if m_type == "movie" else "📺 TV Series"
-                            
-                            st.markdown(f"### {title} ({year}) — *{type_badge}* [{status_badge}]")
-                            st.write(f"**Rating:** ⭐ {rating}/10 | **Language:** {lang} | **Released:** {release_date}")
-                            st.write(f"**Synopsis:** {synopsis}")
-                            
-                            b_col1, b_col2, b_col3 = st.columns(3)
-                            with b_col1:
-                                st.link_button("🌐 AZNude Search", py_url_format(title, "aznude"))
-                            with b_col2:
-                                st.link_button("🌐 AZMen Search", py_url_format(title, "men"))
-                            with b_col3:
-                                watch_label = "Mark Unwatched" if is_watched else "Mark Watched"
-                                if st.button(watch_label, key=f"global_w_{m_id}"):
-                                    toggle_watched_status(m_id, title, m_type, year, saved_tags)
-                                    st.rerun()
-                            
+                        if ai_insight:
+                            st.info(f"💡 **AI Insight:** {ai_insight}")
+
+                        if not filtered_results:
+                            st.warning("No results found matching your search term and current filter settings. Try resetting the Minimum Rating slider to 0.0 or clearing selected flags.")
+                        else:
+                            st.success(f"Found {len(filtered_results)} matching titles")
                             st.divider()
+
+                            for item in filtered_results:
+                                m_id = str(item.get("id"))
+                                m_type = item.get("media_type")
+                                title = item.get("title") if m_type == "movie" else item.get("name")
+                                release_date = item.get("release_date") if m_type == "movie" else item.get("first_air_date")
+                                year = release_date[:4] if release_date else "N/A"
+                                rating = round(item.get("vote_average", 0.0), 1)
+                                synopsis = item.get("overview", "No synopsis available.")
+                                lang = item.get("original_language", "en").upper()
+                                
+                                is_watched, saved_tags = get_watched_status(m_id)
+
+                                with st.container():
+                                    status_badge = "✅ Watched" if is_watched else "📌 Unwatched"
+                                    type_badge = "🎬 Movie" if m_type == "movie" else "📺 TV Series"
+                                    
+                                    st.markdown(f"### {title} ({year}) — *{type_badge}* [{status_badge}]")
+                                    st.write(f"**Rating:** ⭐ {rating}/10 | **Language:** {lang} | **Released:** {release_date}")
+                                    st.write(f"**Synopsis:** {synopsis}")
+                                    
+                                    b_col1, b_col2, b_col3 = st.columns(3)
+                                    with b_col1:
+                                        st.link_button("🌐 AZNude Search", py_url_format(title, "aznude"))
+                                    with b_col2:
+                                        st.link_button("🌐 AZMen Search", py_url_format(title, "men"))
+                                    with b_col3:
+                                        watch_label = "Mark Unwatched" if is_watched else "Mark Watched"
+                                        if st.button(watch_label, key=f"global_w_{m_id}"):
+                                            toggle_watched_status(m_id, title, m_type, year, saved_tags)
+                                            st.rerun()
+                                    
+                                    st.divider()
 
                 except Exception as e:
                     st.error(f"Error executing search: {str(e)}")
